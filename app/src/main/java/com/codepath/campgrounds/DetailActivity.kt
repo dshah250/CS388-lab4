@@ -4,8 +4,8 @@ import android.os.Bundle
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.bumptech.glide.Glide
 
-private const val TAG = "CampgroundDetailActivity"
 const val CAMPGROUND_EXTRA = "CAMPGROUND_EXTRA"
 
 class DetailActivity : AppCompatActivity() {
@@ -18,17 +18,26 @@ class DetailActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_detail)
 
-        // TODO: Find the remaining Views for the screen
         campgroundNameTV = findViewById(R.id.campgroundName)
+        campgroundDescriptionTV = findViewById(R.id.campgroundDescription)
+        campgroundLatLongTV = findViewById(R.id.campgroundLocation)
+        campgroundImageIV = findViewById(R.id.campgroundImage)
 
+        val campground = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(CAMPGROUND_EXTRA, Campground::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getSerializableExtra(CAMPGROUND_EXTRA) as? Campground
+        }
 
-        // TODO: Get the extra from the Intent
+        if (campground != null) {
+            campgroundNameTV.text = campground.name ?: "Unknown Campground"
+            campgroundLatLongTV.text = campground.latLong
+            campgroundDescriptionTV.text = campground.description ?: "No description available"
 
-
-        // TODO:  Set the name, location, and description information
-
-
-        // TODO: Load the image using Glide
-
+            Glide.with(this)
+                .load(campground.imageUrl)
+                .into(campgroundImageIV)
+        }
     }
 }

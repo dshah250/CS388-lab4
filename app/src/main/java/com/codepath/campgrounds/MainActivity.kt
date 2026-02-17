@@ -11,7 +11,6 @@ import com.codepath.asynchttpclient.AsyncHttpClient
 import com.codepath.asynchttpclient.callback.JsonHttpResponseHandler
 import kotlinx.serialization.json.Json
 import okhttp3.Headers
-import org.json.JSONException
 
 fun createJson() = Json {
     isLenient = true
@@ -27,8 +26,7 @@ private val CAMPGROUNDS_URL =
 class MainActivity : AppCompatActivity() {
     private lateinit var campgroundsRecyclerView: RecyclerView
     private lateinit var binding: ActivityMainBinding
-
-    // TODO: Create campgrounds list
+    private val campgrounds = mutableListOf<Campground>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,13 +37,27 @@ class MainActivity : AppCompatActivity() {
 
         campgroundsRecyclerView = findViewById(R.id.campgrounds)
 
-        // TODO: Set up CampgroundAdapter with campgrounds
-
+        val campgroundAdapter = CampgroundAdapter(this, campgrounds)
+        campgroundsRecyclerView.adapter = campgroundAdapter
 
         campgroundsRecyclerView.layoutManager = LinearLayoutManager(this).also {
             val dividerItemDecoration = DividerItemDecoration(this, it.orientation)
             campgroundsRecyclerView.addItemDecoration(dividerItemDecoration)
         }
+
+        campgrounds.add(
+            Campground(
+                name = "Test Campground",
+                description = "This is a test to verify the RecyclerView works",
+                latitude = "47.5",
+                longitude = "-120.5",
+                images = listOf(CampgroundImage(url = "https://www.nps.gov/common/uploads/parks/8f8a5c3a-1dd1-b71b-0b23-d1234567890a/8f8a5c3a-1dd1-b71b-0b23-d1234567890a.jpg"))
+            )
+        )
+        campgroundAdapter.notifyDataSetChanged()
+
+        Log.d(TAG, "API Key: $PARKS_API_KEY")
+        Log.d(TAG, "API URL: $CAMPGROUNDS_URL")
 
         val client = AsyncHttpClient()
         client.get(CAMPGROUNDS_URL, object : JsonHttpResponseHandler() {
@@ -56,19 +68,49 @@ class MainActivity : AppCompatActivity() {
                 throwable: Throwable?
             ) {
                 Log.e(TAG, "Failed to fetch campgrounds: $statusCode")
+                Log.e(TAG, "Response: $response")
+                Log.e(TAG, "Throwable: ${throwable?.message}", throwable)
             }
 
             override fun onSuccess(statusCode: Int, headers: Headers, json: JSON) {
-                Log.i(TAG, "Successfully fetched campgrounds: $json")
+                Log.i(TAG, "Successfully fetched campgrounds")
+                Log.d(TAG, "Full JSON response: ${json.jsonObject.toString().take(500)}")
                 try {
-                    // TODO: Create the parsedJSON
+                    val jsonString = json.jsonObject.toString()
+                    Log.d(TAG, "JSON Keys: ${json.jsonObject.keys()}")
 
-                    // TODO: Do something with the returned json (contains campground information)
+                    val parsedJson = createJson().decodeFromString(
+                        CampgroundResponse.serializer(),
+                        jsonString
+                    )
+                    Log.d(TAG, "Successfully parsed response. Campgrounds count: ${parsedJson.data?.size ?: 0}")
 
-                    // TODO: Save the campgrounds and reload the screen
+                    parsedJson.data?.let { list ->
+                        Log.d(TAG, "Adding ${list.size} campgrounds to list")
+                        list.forEach { camp ->
+                            Log.d(TAG, "Campground: ${camp.name}, Images: ${camp.images?.size ?: 0}")
+                        }
+                        campgrounds.clear()
+                        campgrounds.addAll(list)
 
-                } catch (e: JSONException) {
-                    Log.e(TAG, "Exception: $e")
+                        campgroundAdapter.notifyDataSetChanged()
+                        Log.d(TAG, "Adapter notified. Campgrounds in list: ${campgrounds.size}")
+                    } ?: run {
+                        Log.w(TAG, "No data in response - attempting alternative parsing")
+                        try {
+                            val directList = createJson().decodeFromString<List<Campground>>(jsonString)
+                            Log.d(TAG, "Successfully parsed ${directList.size} campgrounds from direct array")
+                            campgrounds.clear()
+                            campgrounds.addAll(directList)
+                            campgroundAdapter.notifyDataSetChanged()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Alternative parsing also failed: ${e.message}")
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception: ${e.message}", e)
+                    e.printStackTrace()
                 }
             }
 
