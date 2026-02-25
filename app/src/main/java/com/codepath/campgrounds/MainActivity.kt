@@ -3,12 +3,15 @@ package com.codepath.campgrounds
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.codepath.campgrounds.databinding.ActivityMainBinding
 import com.codepath.asynchttpclient.AsyncHttpClient
 import com.codepath.asynchttpclient.callback.JsonHttpResponseHandler
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.Headers
 
@@ -45,19 +48,24 @@ class MainActivity : AppCompatActivity() {
             campgroundsRecyclerView.addItemDecoration(dividerItemDecoration)
         }
 
-        campgrounds.add(
-            Campground(
-                name = "Test Campground",
-                description = "This is a test to verify the RecyclerView works",
-                latitude = "47.5",
-                longitude = "-120.5",
-                images = listOf(CampgroundImage(url = "https://www.nps.gov/common/uploads/parks/8f8a5c3a-1dd1-b71b-0b23-d1234567890a/8f8a5c3a-1dd1-b71b-0b23-d1234567890a.jpg"))
-            )
-        )
-        campgroundAdapter.notifyDataSetChanged()
-
-        Log.d(TAG, "API Key: $PARKS_API_KEY")
-        Log.d(TAG, "API URL: $CAMPGROUNDS_URL")
+        // Step 7: Load items from our database (single source of truth)
+        lifecycleScope.launch {
+            (application as CampgroundApplication).db.campgroundDao().getAll().collect { databaseList ->
+                databaseList.map { entity ->
+                    Campground(
+                        name = entity.name,
+                        description = entity.description,
+                        latitude = null,
+                        longitude = null,
+                        images = listOf(CampgroundImage(url = entity.imageUrl))
+                    )
+                }.also { mappedList ->
+                    campgrounds.clear()
+                    campgrounds.addAll(mappedList)
+                    campgroundAdapter.notifyDataSetChanged()
+                }
+            }
+        }
 
         val client = AsyncHttpClient()
         client.get(CAMPGROUNDS_URL, object : JsonHttpResponseHandler() {
@@ -68,52 +76,34 @@ class MainActivity : AppCompatActivity() {
                 throwable: Throwable?
             ) {
                 Log.e(TAG, "Failed to fetch campgrounds: $statusCode")
-                Log.e(TAG, "Response: $response")
-                Log.e(TAG, "Throwable: ${throwable?.message}", throwable)
             }
 
             override fun onSuccess(statusCode: Int, headers: Headers, json: JSON) {
                 Log.i(TAG, "Successfully fetched campgrounds")
-                Log.d(TAG, "Full JSON response: ${json.jsonObject.toString().take(500)}")
                 try {
-                    val jsonString = json.jsonObject.toString()
-                    Log.d(TAG, "JSON Keys: ${json.jsonObject.keys()}")
-
                     val parsedJson = createJson().decodeFromString(
                         CampgroundResponse.serializer(),
-                        jsonString
+                        json.jsonObject.toString()
                     )
-                    Log.d(TAG, "Successfully parsed response. Campgrounds count: ${parsedJson.data?.size ?: 0}")
 
+                    // Step 5 & 6: Save fetched data into Room database on IO thread
                     parsedJson.data?.let { list ->
-                        Log.d(TAG, "Adding ${list.size} campgrounds to list")
-                        list.forEach { camp ->
-                            Log.d(TAG, "Campground: ${camp.name}, Images: ${camp.images?.size ?: 0}")
-                        }
-                        campgrounds.clear()
-                        campgrounds.addAll(list)
-
-                        campgroundAdapter.notifyDataSetChanged()
-                        Log.d(TAG, "Adapter notified. Campgrounds in list: ${campgrounds.size}")
-                    } ?: run {
-                        Log.w(TAG, "No data in response - attempting alternative parsing")
-                        try {
-                            val directList = createJson().decodeFromString<List<Campground>>(jsonString)
-                            Log.d(TAG, "Successfully parsed ${directList.size} campgrounds from direct array")
-                            campgrounds.clear()
-                            campgrounds.addAll(directList)
-                            campgroundAdapter.notifyDataSetChanged()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Alternative parsing also failed: ${e.message}")
+                        lifecycleScope.launch(IO) {
+                            (application as CampgroundApplication).db.campgroundDao().deleteAll()
+                            (application as CampgroundApplication).db.campgroundDao().insertAll(list.map {
+                                CampgroundEntity(
+                                    name = it.name,
+                                    description = it.description,
+                                    latLong = it.latLong,
+                                    imageUrl = it.imageUrl
+                                )
+                            })
                         }
                     }
-
                 } catch (e: Exception) {
                     Log.e(TAG, "Exception: ${e.message}", e)
-                    e.printStackTrace()
                 }
             }
-
         })
     }
 }
